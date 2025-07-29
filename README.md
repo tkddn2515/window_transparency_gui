@@ -1,45 +1,64 @@
-# Chrome Transparency GUI
+# Window Transparency GUI
 
-This is a simple GUI application to control the transparency of Google Chrome windows on Windows.
+A simple GUI application to control the transparency of any window on Microsoft Windows.
 
-## 빌드 방법 (How to Build)
+## Features
 
-이 애플리케이션을 `.exe` 실행 파일로 빌드하려면 다음 단계를 따르세요.
+-   Lists all visible windows on the system.
+-   Allows you to apply a transparency effect to any selected window.
+-   Adjust transparency level with a simple slider (0% to 100%).
+-   Reset the transparency of a window back to its default opaque state.
 
-### 1. 가상 환경 생성 및 활성화 (Create and Activate Virtual Environment)
+## How to Use
 
-프로젝트 폴더에서 다음 명령을 실행하여 Python 가상 환경을 생성하고 활성화합니다. 이미 가상 환경이 있다면 활성화 단계만 진행하세요.
+1.  **Run the application** (`WindowTransparencyGUI.exe` or `python window_transparency_gui.py`).
+2.  **Refresh List**: Click the "Refresh List" button to get a list of all currently open and visible windows.
+3.  **Select a Window**: Click on the title of the window you want to modify from the list.
+4.  **Adjust Transparency**:
+    *   Move the slider to the desired transparency level. (0% is fully transparent, 100% is fully opaque).
+    *   Click the **"Apply Transparency"** button.
+5.  **Reset Transparency**:
+    *   Select a window from the list that you have previously modified.
+    *   Click the **"Reset Transparency"** button to make it fully opaque again.
+
+## How to Build
+
+Follow these steps to build this application into a standalone `.exe` file.
+
+### 1. Create and Activate a Virtual Environment
+
+From the project folder, create and activate a Python virtual environment. If you already have one, just activate it.
 
 ```bash
-# 1. 가상 환경 생성 (Create virtual environment)
-# 시스템에 설치된 Python 버전에 따라 python 또는 python3를 사용하세요.
+# 1. Create virtual environment
+# Use python or python3 depending on your system's Python installation.
 python -m venv venv
 
-# 2. 가상 환경 활성화 (Activate virtual environment on Windows)
+# 2. Activate virtual environment on Windows
 .\venv\Scripts\activate
 ```
 
-### 2. 필요 패키지 설치 (Install Dependencies)
+### 2. Install Dependencies
 
-가상 환경이 활성화된 상태에서, `requirements.txt` 파일에 명시된 패키지를 설치합니다.
+With the virtual environment activated, install the required packages from `requirements.txt`.
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3. 실행 파일 빌드 (Build the Executable)
+### 3. Build the Executable
 
-`pyinstaller`를 사용하여 `.py` 파일을 `.exe` 실행 파일로 빌드합니다.
+Use `pyinstaller` to build the `.py` file into an `.exe` executable.
 
 ```bash
-pyinstaller --onefile --windowed --name ChromeTransparencyGUI chrome_transparency_gui.py
+pyinstaller --onefile --windowed --name WindowTransparencyGUI window_transparency_gui.py
 ```
 
-**빌드 옵션 설명:**
-*   `--onefile`: 모든 파일을 하나의 실행 파일로 묶습니다.
-*   `--windowed`: 실행 시 콘솔 창(검은 창)이 나타나지 않도록 합니다.
-*   `--name ChromeTransparencyGUI`: 생성될 실행 파일의 이름을 `ChromeTransparencyGUI.exe`로 지정합니다.
+**Build Options Explained:**
+*   `--onefile`: Bundles everything into a single executable file.
+*   `--windowed`: Prevents the console window (black terminal) from appearing when the application is run.
+*   `--name WindowTransparencyGUI`: Sets the output file name to `WindowTransparencyGUI.exe`.
 
-### 4. 빌드 결과 확인 (Check the Result)
+### 4. Check the Result
 
-빌드가 성공적으로 완료되면, 프로젝트 폴더 내에 `dist` 폴더가 생성됩니다. 이 폴더 안에 최종 결과물인 `ChromeTransparencyGUI.exe` 파일이 있습니다.
+After a successful build, a `dist` folder will be created in the project directory. Your final `WindowTransparencyGUI.exe` file will be inside this folder.
