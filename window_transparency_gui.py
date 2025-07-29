@@ -20,29 +20,28 @@ EnumWindows = user32.EnumWindows
 EnumWindowsProc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 GetWindowTextW = user32.GetWindowTextW
 GetWindowTextLengthW = user32.GetWindowTextLengthW
-GetClassNameW = user32.GetClassNameW
 IsWindowVisible = user32.IsWindowVisible
 GetWindowLongW = user32.GetWindowLongW
 SetWindowLongW = user32.SetWindowLongW
 SetLayeredWindowAttributes = user32.SetLayeredWindowAttributes
 RedrawWindow = user32.RedrawWindow
 
-class ChromeTransparencyApp:
+class WindowTransparencyApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Chrome Transparency Controller")
+        self.root.title("Window Transparency Controller")
         self.root.geometry("450x400")
         self.root.resizable(False, True)
 
         # Store found windows as a list of (hwnd, title) tuples
-        self.chrome_windows = []
+        self.open_windows = []
 
         # --- GUI Setup ---
         main_frame = ttk.Frame(root, padding="10")
         main_frame.pack(fill=tk.BOTH, expand=True)
 
         # Window List
-        list_frame = ttk.LabelFrame(main_frame, text="Open Chrome Windows")
+        list_frame = ttk.LabelFrame(main_frame, text="Open Windows")
         list_frame.pack(fill=tk.BOTH, expand=True, pady=5)
 
         self.listbox = tk.Listbox(list_frame, selectmode=tk.SINGLE)
@@ -97,43 +96,37 @@ class ChromeTransparencyApp:
             if length > 0:
                 buffer = ctypes.create_unicode_buffer(length + 1)
                 GetWindowTextW(hwnd, buffer, length + 1)
-                
-                class_buffer = ctypes.create_unicode_buffer(256)
-                GetClassNameW(hwnd, class_buffer, 256)
-
-                # Find windows belonging to Chrome
-                if "Chrome_WidgetWin_1" in class_buffer.value:
-                    self.chrome_windows.append((hwnd, buffer.value))
+                self.open_windows.append((hwnd, buffer.value))
         return True
 
     def refresh_window_list(self):
         self.status_var.set("Refreshing window list...")
         self.listbox.delete(0, tk.END)
-        self.chrome_windows.clear()
+        self.open_windows.clear()
 
         # Enumerate all top-level windows
         EnumWindows(EnumWindowsProc(self._enum_windows_callback), 0)
 
-        if not self.chrome_windows:
-            self.listbox.insert(tk.END, "No Chrome windows found.")
-            self.status_var.set("No Chrome windows found. Make sure Chrome is running.")
+        if not self.open_windows:
+            self.listbox.insert(tk.END, "No windows found.")
+            self.status_var.set("No windows found.")
         else:
-            for _, title in self.chrome_windows:
+            for _, title in self.open_windows:
                 self.listbox.insert(tk.END, title)
-            self.status_var.set(f"Found {len(self.chrome_windows)} Chrome window(s). Select one.")
+            self.status_var.set(f"Found {len(self.open_windows)} window(s). Select one.")
 
     def get_selected_hwnd(self):
         selection_indices = self.listbox.curselection()
         if not selection_indices:
-            messagebox.showwarning("No Selection", "Please select a Chrome window from the list.")
+            messagebox.showwarning("No Selection", "Please select a window from the list.")
             return None
         
         selected_index = selection_indices[0]
-        if selected_index >= len(self.chrome_windows):
+        if selected_index >= len(self.open_windows):
              messagebox.showerror("Error", "Invalid selection. Please refresh the list.")
              return None
 
-        hwnd, title = self.chrome_windows[selected_index]
+        hwnd, title = self.open_windows[selected_index]
         return hwnd
 
     def apply_transparency(self):
@@ -178,5 +171,5 @@ class ChromeTransparencyApp:
 
 if __name__ == "__main__":
     root = tk.Tk()
-    app = ChromeTransparencyApp(root)
+    app = WindowTransparencyApp(root)
     root.mainloop()
