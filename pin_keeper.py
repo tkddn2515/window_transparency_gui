@@ -11,6 +11,8 @@ from typing import Callable, Iterable, NamedTuple, Optional, Sequence
 import pin_order
 from pin_order import PinError, PinnedWindow
 
+OWNER_LABEL = "(this controller)"
+
 
 class SyncReport(NamedTuple):
     """What a single :meth:`PinKeeper.sync` pass had to do."""
@@ -59,9 +61,42 @@ class Win32PinBackend:
 class PinKeeper:
     """Pin windows on top and hold them in a fixed order relative to each other."""
 
-    def __init__(self, backend: Optional[object] = None) -> None:
+    def __init__(
+        self, backend: Optional[object] = None, owner_hwnd: int = 0
+    ) -> None:
         self._backend = backend if backend is not None else Win32PinBackend()
         self._pins = ()
+        self._owner_hwnd = owner_hwnd
+        self._keep_owner_front = True
+
+    @property
+    def owner_hwnd(self) -> int:
+        """The controller's own window, kept in front of the pinned ones."""
+        return self._owner_hwnd
+
+    def set_owner(self, hwnd: int) -> tuple[str, ...]:
+        """Adopt ``hwnd`` as the controller window and put it in front."""
+        self._owner_hwnd = hwnd
+        return self._enforce_order()
+
+    @property
+    def keep_owner_front(self) -> bool:
+        return self._keep_owner_front
+
+    def set_keep_owner_front(self, enabled: bool) -> tuple[str, ...]:
+        """Keep the controller above every pinned window, or let it go back.
+
+        Pinned windows are always-on-top, so without this the controller ends
+        up buried underneath them and cannot be clicked at all.
+        """
+        self._keep_owner_front = bool(enabled)
+        return self._enforce_order()
+
+    def raise_owner(self) -> tuple[str, ...]:
+        """Bring the controller back in front, if it is not already there."""
+        if not self._owner_front_active() or self._owner_is_in_front():
+            return ()
+        return self._collect_failure(self._owner_hwnd, self._backend.pin)
 
     @property
     def pins(self) -> tuple[PinnedWindow, ...]:
@@ -106,7 +141,7 @@ class PinKeeper:
             if self._backend.exists(pin.hwnd):
                 failures += self._collect_failure(pin.hwnd, self._backend.unpin)
         self._pins = ()
-        return failures
+        return failures + self._release_owner_if_idle()
 
     def move(self, index: int, offset: int) -> tuple[int, tuple[str, ...]]:
         """Shift the pin at ``index`` by ``offset`` layers and re-apply the order.
@@ -134,20 +169,64 @@ class PinKeeper:
                 alive = pin_order.with_title(alive, pin.hwnd, title)
 
         self._pins = alive
-        if not alive or self._order_holds():
+        if self._order_holds():
             return SyncReport(dropped=dropped)
         return SyncReport(dropped=dropped, reordered=True, failures=self._enforce_order())
 
-    def _order_holds(self) -> bool:
-        if not all(self._backend.is_topmost(pin.hwnd) for pin in self._pins):
+    def _front_sequence(self) -> tuple[PinnedWindow, ...]:
+        """The stacking order to enforce, controller first when it is held up."""
+        if not self._owner_front_active():
+            return self._pins
+        others = pin_order.without_pin(self._pins, self._owner_hwnd)
+        owner = PinnedWindow(hwnd=self._owner_hwnd, title=OWNER_LABEL)
+        return (owner,) + others
+
+    def _owner_front_active(self) -> bool:
+        """True while the controller has to stay above the pinned windows."""
+        return bool(
+            self._keep_owner_front
+            and self._pins
+            and self._owner_hwnd
+            and self._backend.exists(self._owner_hwnd)
+        )
+
+    def _release_owner_if_idle(self) -> tuple[str, ...]:
+        """Drop the controller back to the normal band when it need not float.
+
+        A window the user pinned explicitly is left alone, even when it is the
+        controller itself.
+        """
+        if self._owner_front_active() or not self._owner_hwnd:
+            return ()
+        if pin_order.is_pinned(self._pins, self._owner_hwnd):
+            return ()
+        if not self._backend.exists(self._owner_hwnd):
+            return ()
+        if not self._backend.is_topmost(self._owner_hwnd):
+            return ()
+        return self._collect_failure(self._owner_hwnd, self._backend.unpin)
+
+    def _owner_is_in_front(self) -> bool:
+        if not self._backend.is_topmost(self._owner_hwnd):
             return False
-        live_order = self._backend.zorder(pin_order.handles(self._pins))
-        return pin_order.matches_zorder(self._pins, live_order)
+        live = self._backend.zorder(pin_order.handles(self._front_sequence()))
+        return bool(live) and live[0] == self._owner_hwnd
+
+    def _order_holds(self) -> bool:
+        sequence = self._front_sequence()
+        if not sequence:
+            return True
+        if not all(self._backend.is_topmost(pin.hwnd) for pin in sequence):
+            return False
+        live_order = self._backend.zorder(pin_order.handles(sequence))
+        return pin_order.matches_zorder(sequence, live_order)
 
     def _enforce_order(self) -> tuple[str, ...]:
-        if not self._pins:
-            return ()
-        return tuple(self._backend.apply_order(self._pins))
+        failures = self._release_owner_if_idle()
+        sequence = self._front_sequence()
+        if not sequence:
+            return failures
+        return failures + tuple(self._backend.apply_order(sequence))
 
     @staticmethod
     def _collect_failure(hwnd: int, action: Callable[[int], None]) -> tuple[str, ...]:

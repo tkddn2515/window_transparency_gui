@@ -38,6 +38,18 @@ def is_topmost(hwnd: int) -> bool:
     return bool(ex_style & winapi.WS_EX_TOPMOST)
 
 
+def root_window_of(hwnd: int) -> int:
+    """Return the top-level window ``hwnd`` belongs to.
+
+    Tk reports a child handle for its toplevels, which the z-order calls
+    ignore; the root ancestor is the handle Windows actually stacks.
+    """
+    if not hwnd:
+        return 0
+    root = winapi.GetAncestor(hwnd, winapi.GA_ROOT)
+    return int(root) if root else hwnd
+
+
 def enumerate_visible_windows() -> tuple[WindowInfo, ...]:
     """Return every titled, visible top-level window, front-most first.
 

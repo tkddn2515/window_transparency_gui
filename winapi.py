@@ -26,6 +26,9 @@ RDW_ALLCHILDREN = 0x0080
 RDW_FRAME = 0x0400
 RDW_FULL_REFRESH = RDW_ERASE | RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN
 
+# --- GetAncestor constants ---
+GA_ROOT = 2
+
 # --- SetWindowPos constants ---
 HWND_TOPMOST = -1
 HWND_NOTOPMOST = -2
@@ -80,6 +83,10 @@ SetLayeredWindowAttributes.argtypes = [
     wintypes.DWORD,
 ]
 SetLayeredWindowAttributes.restype = wintypes.BOOL
+
+GetAncestor = user32.GetAncestor
+GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
+GetAncestor.restype = wintypes.HWND
 
 SetWindowPos = user32.SetWindowPos
 SetWindowPos.argtypes = [

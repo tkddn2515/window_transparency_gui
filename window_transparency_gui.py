@@ -14,6 +14,8 @@ from topmost import WindowOperationError
 
 DEFAULT_ALPHA_PERCENT = 85
 SYNC_INTERVAL_MS = 1000
+OWN_WINDOW_RETRY_MS = 100
+OWN_WINDOW_MAX_TRIES = 30
 WINDOW_GEOMETRY = "520x680"
 
 
@@ -46,6 +48,7 @@ class WindowTransparencyApp:
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.refresh_pin_list()
         self.refresh_window_list()
+        self.root.after_idle(self._adopt_own_window)
         self._schedule_sync()
 
     # --- Layout -----------------------------------------------------------
@@ -148,6 +151,14 @@ class WindowTransparencyApp:
             pin_frame,
             text="Keep this order locked (re-apply automatically every second)",
             variable=self.lock_order_var,
+        ).pack(anchor=tk.W, padx=5, pady=(0, 2))
+
+        self.stay_in_front_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            pin_frame,
+            text="Keep this controller in front of pinned windows",
+            variable=self.stay_in_front_var,
+            command=self.toggle_stay_in_front,
         ).pack(anchor=tk.W, padx=5, pady=(0, 5))
 
     # --- Window list ------------------------------------------------------
@@ -223,6 +234,11 @@ class WindowTransparencyApp:
         if self.keeper.is_pinned(info.hwnd):
             self.status_var.set(f'"{info.title}" is already pinned.')
             return
+        if info.hwnd == self.keeper.owner_hwnd and self.keeper.keep_owner_front:
+            self.status_var.set(
+                "This controller is already kept in front of pinned windows."
+            )
+            return
 
         try:
             failures = self.keeper.pin(info.hwnd, info.title)
@@ -294,6 +310,43 @@ class WindowTransparencyApp:
             return None
         return pins[index]
 
+    def _adopt_own_window(self, attempt: int = 1) -> None:
+        """Hand our own window to the keeper so it can be held in front.
+
+        Pinned windows are always-on-top; without this the controller sits in
+        the normal band and every pinned window covers it for good.  Tk hands
+        out a child handle until the frame Windows actually stacks exists, so
+        this retries until the two differ.
+        """
+        widget_id = self.root.winfo_id()
+        hwnd = window_query.root_window_of(widget_id)
+        if hwnd == widget_id:
+            if attempt < OWN_WINDOW_MAX_TRIES:
+                self.root.after(
+                    OWN_WINDOW_RETRY_MS,
+                    lambda: self._adopt_own_window(attempt + 1),
+                )
+                return
+            self.status_var.set(
+                "Could not identify this window; pinned windows may cover it."
+            )
+            return
+
+        failures = self.keeper.set_owner(hwnd)
+        if failures:
+            self.status_var.set(failures[0])
+
+    def toggle_stay_in_front(self) -> None:
+        """Apply the \"keep this controller in front\" checkbox."""
+        enabled = self.stay_in_front_var.get()
+        failures = self.keeper.set_keep_owner_front(enabled)
+        message = (
+            "This window will stay in front of pinned windows."
+            if enabled
+            else "This window no longer stays in front; pinned windows may cover it."
+        )
+        self._report_failures(failures, message)
+
     def preview_pin_order(self, start: int, current: int) -> None:
         """Show how the list would look mid-drag, without touching any window."""
         previewed = pin_order.moved(self.keeper.pins, start, current - start)
@@ -356,6 +409,8 @@ class WindowTransparencyApp:
                     self.status_var.set(f"Removed closed window(s) from pins: {closed}.")
                 elif report.failures:
                     self.status_var.set(report.failures[0])
+            else:
+                self.keeper.raise_owner()
         except Exception as error:  # a timer must never kill the event loop
             self.status_var.set(f"Order lock paused: {error}")
         finally:
