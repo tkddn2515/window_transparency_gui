@@ -124,6 +124,27 @@ class PinKeeper:
         self._pins = candidate
         return self._enforce_order()
 
+    def restore(self, pins: Sequence[PinnedWindow]) -> tuple[PinnedWindow, ...]:
+        """Adopt windows a previous run left pinned, keeping their saved order.
+
+        Only windows that still exist, still carry the same title and are still
+        always-on-top are taken back; a recycled handle must never be grabbed.
+        """
+        adopted = tuple(
+            pin
+            for pin in pins[:pin_order.MAX_PINNED_WINDOWS]
+            if pin.hwnd > 0
+            and self._backend.exists(pin.hwnd)
+            and self._backend.is_topmost(pin.hwnd)
+            and self._backend.title_of(pin.hwnd) == pin.title
+        )
+        if not adopted:
+            return ()
+
+        self._pins = adopted
+        self._enforce_order()
+        return adopted
+
     def unpin(self, hwnd: int) -> tuple[str, ...]:
         """Release ``hwnd`` back to the normal window band."""
         if not pin_order.is_pinned(self._pins, hwnd):

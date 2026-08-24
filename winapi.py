@@ -88,6 +88,15 @@ GetAncestor = user32.GetAncestor
 GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
 GetAncestor.restype = wintypes.HWND
 
+GetLayeredWindowAttributes = user32.GetLayeredWindowAttributes
+GetLayeredWindowAttributes.argtypes = [
+    wintypes.HWND,
+    ctypes.POINTER(wintypes.COLORREF),
+    ctypes.POINTER(ctypes.c_ubyte),
+    ctypes.POINTER(wintypes.DWORD),
+]
+GetLayeredWindowAttributes.restype = wintypes.BOOL
+
 SetWindowPos = user32.SetWindowPos
 SetWindowPos.argtypes = [
     wintypes.HWND,

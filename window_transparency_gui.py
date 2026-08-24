@@ -5,6 +5,7 @@ from tkinter import messagebox, ttk
 from typing import Optional, Sequence
 
 import pin_order
+import pin_state
 import transparency
 import window_query
 from pin_drag import ListboxDragReorder
@@ -177,9 +178,21 @@ class WindowTransparencyApp:
             return
 
         for info in self.open_windows:
-            marker = "📌 " if self.keeper.is_pinned(info.hwnd) else ""
-            self.listbox.insert(tk.END, f"{marker}{info.title}")
+            self.listbox.insert(tk.END, self._describe(info))
         self.status_var.set(f"Found {len(self.open_windows)} window(s). Select one.")
+
+    def _describe(self, info: window_query.WindowInfo) -> str:
+        """Label a window with what is currently applied to it."""
+        if self.keeper.is_pinned(info.hwnd):
+            marker = "📌 "
+        elif window_query.is_topmost(info.hwnd):
+            marker = "⬆ "  # on top, but not pinned by this app
+        else:
+            marker = ""
+
+        opacity = window_query.opacity_percent(info.hwnd)
+        alpha = f"({opacity}%) " if opacity is not None else ""
+        return f"{marker}{alpha}{info.title}"
 
     def get_selected_window(self) -> Optional[window_query.WindowInfo]:
         """Return the highlighted :class:`WindowInfo`, or None after warning."""
@@ -248,6 +261,7 @@ class WindowTransparencyApp:
 
         self.refresh_pin_list()
         self.refresh_window_list()
+        self._persist_pins()
         self._report_failures(
             failures, f'Pinned "{info.title}" at layer {len(self.keeper.pins)}.'
         )
@@ -260,6 +274,7 @@ class WindowTransparencyApp:
         failures = self.keeper.unpin(pin.hwnd)
         self.refresh_pin_list()
         self.refresh_window_list()
+        self._persist_pins()
         self._report_failures(failures, f'Unpinned "{pin.title}".')
 
     def unpin_all(self) -> None:
@@ -270,6 +285,7 @@ class WindowTransparencyApp:
         failures = self.keeper.unpin_all()
         self.refresh_pin_list()
         self.refresh_window_list()
+        self._persist_pins()
         self._report_failures(failures, "All windows have been unpinned.")
 
     def move_pin_up(self) -> None:
@@ -293,6 +309,7 @@ class WindowTransparencyApp:
 
         self.refresh_pin_list(select_index=new_index)
         self.pin_listbox.see(new_index)
+        self._persist_pins()
         self._report_failures(failures, f"Moved to layer {new_index + 1}.")
 
     def _selected_pin(self) -> Optional[PinnedWindow]:
@@ -335,6 +352,31 @@ class WindowTransparencyApp:
         failures = self.keeper.set_owner(hwnd)
         if failures:
             self.status_var.set(failures[0])
+        self._restore_previous_pins()
+
+    def _restore_previous_pins(self) -> None:
+        """Take back windows an earlier run left pinned.
+
+        Closing normally releases every pin, so anything found here was left
+        behind by a kill or a crash and would otherwise be stuck on top with
+        no way to see or undo it.
+        """
+        remembered = pin_state.load()
+        if not remembered:
+            return
+
+        adopted = self.keeper.restore(remembered)
+        self.refresh_pin_list()
+        self.refresh_window_list()
+        self._persist_pins()
+        if adopted:
+            self.status_var.set(
+                f"Took back {len(adopted)} window(s) still pinned from the last run."
+            )
+
+    def _persist_pins(self) -> None:
+        """Remember the pin list so a crash cannot strand these windows."""
+        pin_state.save(self.keeper.pins)
 
     def toggle_stay_in_front(self) -> None:
         """Apply the \"keep this controller in front\" checkbox."""
@@ -361,6 +403,7 @@ class WindowTransparencyApp:
 
         self.refresh_pin_list(select_index=new_index)
         self.pin_listbox.see(new_index)
+        self._persist_pins()
         self._report_failures(failures, f"Moved to layer {new_index + 1}.")
 
     def refresh_pin_list(self, select_index: Optional[int] = None) -> None:
@@ -405,6 +448,7 @@ class WindowTransparencyApp:
                 report = self.keeper.sync()
                 if report.dropped:
                     self.refresh_pin_list()
+                    self._persist_pins()
                     closed = ", ".join(f'"{pin.title}"' for pin in report.dropped)
                     self.status_var.set(f"Removed closed window(s) from pins: {closed}.")
                 elif report.failures:
@@ -425,6 +469,7 @@ class WindowTransparencyApp:
             self._sync_job = None
         try:
             self.keeper.unpin_all()
+            pin_state.clear()
         except Exception:
             pass  # closing must not be blocked by a protected window
         self.root.destroy()

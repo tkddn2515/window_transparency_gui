@@ -1,7 +1,8 @@
 """Read-only queries about the windows currently open on the desktop."""
 
 import ctypes
-from typing import Iterable, NamedTuple
+from ctypes import wintypes
+from typing import Iterable, NamedTuple, Optional
 
 import winapi
 
@@ -48,6 +49,31 @@ def root_window_of(hwnd: int) -> int:
         return 0
     root = winapi.GetAncestor(hwnd, winapi.GA_ROOT)
     return int(root) if root else hwnd
+
+
+def opacity_percent(hwnd: int) -> Optional[int]:
+    """Return the window's opacity in percent, or None when it is not layered.
+
+    A layered window that never had an alpha set reads back as fully opaque,
+    which is reported as None so the list stays quiet about it.
+    """
+    if not exists(hwnd):
+        return None
+    ex_style = winapi.GetWindowLong(hwnd, winapi.GWL_EXSTYLE)
+    if not ex_style & winapi.WS_EX_LAYERED:
+        return None
+
+    colour = wintypes.COLORREF()
+    alpha = ctypes.c_ubyte()
+    flags = wintypes.DWORD()
+    ok = winapi.GetLayeredWindowAttributes(
+        hwnd, ctypes.byref(colour), ctypes.byref(alpha), ctypes.byref(flags)
+    )
+    if not ok or not flags.value & winapi.LWA_ALPHA:
+        return None
+
+    percent = round(alpha.value * 100 / winapi.OPAQUE_ALPHA)
+    return None if percent >= 100 else percent
 
 
 def enumerate_visible_windows() -> tuple[WindowInfo, ...]:
