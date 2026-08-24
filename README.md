@@ -87,7 +87,6 @@ pyinstaller --onefile --windowed --name WindowTransparencyGUI window_transparenc
 2. 고정된 창은 아래 **"Always on Top"** 목록에 추가되고, 창 목록에서는 📌 표시가 붙습니다.
 3. 고정을 시작하면 **이 프로그램 창이 자동으로 맨 앞으로 올라옵니다.** 고정된 창들이 항상 위에
    떠 있기 때문에, 그러지 않으면 이 프로그램이 뒤에 깔려 조작할 수 없기 때문입니다.
-   이 동작이 싫다면 **"Keep this controller in front of pinned windows"** 체크를 끄면 됩니다.
 
 ### 4. 순서 정하기
 
@@ -96,8 +95,8 @@ pyinstaller --onefile --windowed --name WindowTransparencyGUI window_transparenc
 - **드래그로 바꾸기**: 목록에서 창을 마우스로 끌어 원하는 위치에 놓으면 됩니다.
   끄는 동안에는 목록에서 미리보기만 바뀌고, 손을 떼는 순간 실제 창 순서에 반영됩니다.
 - **버튼으로 바꾸기**: 창을 선택하고 **▲ Up** / **▼ Down** 버튼을 누릅니다.
-- **"Keep this order locked"** 를 켜 두면 (기본값) 1초마다 순서를 다시 적용합니다.
-  다른 "항상 위" 프로그램이 앞으로 끼어들어도 지정한 순서로 되돌아갑니다.
+- 지정한 순서는 **1초마다 자동으로 다시 적용**됩니다. 다른 "항상 위" 프로그램이 앞으로
+  끼어들거나, 고정된 창을 클릭해 앞으로 나와도 지정한 순서로 되돌아갑니다.
 
 ### 5. 고정 해제하기
 

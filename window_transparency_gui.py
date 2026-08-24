@@ -147,19 +147,13 @@ class WindowTransparencyApp:
             side=tk.LEFT, fill=tk.X, expand=True
         )
 
-        self.lock_order_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(
+        ttk.Label(
             pin_frame,
-            text="Keep this order locked (re-apply automatically every second)",
-            variable=self.lock_order_var,
-        ).pack(anchor=tk.W, padx=5, pady=(0, 2))
-
-        self.stay_in_front_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(
-            pin_frame,
-            text="Keep this controller in front of pinned windows",
-            variable=self.stay_in_front_var,
-            command=self.toggle_stay_in_front,
+            text=(
+                "The order above is re-applied every second, and this window stays\n"
+                "in front of the pinned ones so it never gets buried."
+            ),
+            justify=tk.LEFT,
         ).pack(anchor=tk.W, padx=5, pady=(0, 5))
 
     # --- Window list ------------------------------------------------------
@@ -247,7 +241,7 @@ class WindowTransparencyApp:
         if self.keeper.is_pinned(info.hwnd):
             self.status_var.set(f'"{info.title}" is already pinned.')
             return
-        if info.hwnd == self.keeper.owner_hwnd and self.keeper.keep_owner_front:
+        if info.hwnd == self.keeper.owner_hwnd:
             self.status_var.set(
                 "This controller is already kept in front of pinned windows."
             )
@@ -378,17 +372,6 @@ class WindowTransparencyApp:
         """Remember the pin list so a crash cannot strand these windows."""
         pin_state.save(self.keeper.pins)
 
-    def toggle_stay_in_front(self) -> None:
-        """Apply the \"keep this controller in front\" checkbox."""
-        enabled = self.stay_in_front_var.get()
-        failures = self.keeper.set_keep_owner_front(enabled)
-        message = (
-            "This window will stay in front of pinned windows."
-            if enabled
-            else "This window no longer stays in front; pinned windows may cover it."
-        )
-        self._report_failures(failures, message)
-
     def preview_pin_order(self, start: int, current: int) -> None:
         """Show how the list would look mid-drag, without touching any window."""
         previewed = pin_order.moved(self.keeper.pins, start, current - start)
@@ -444,7 +427,7 @@ class WindowTransparencyApp:
         try:
             if self.pin_drag.is_dragging:
                 return  # never rebuild the list while the user is dragging
-            if self.keeper.pins and self.lock_order_var.get():
+            if self.keeper.pins:
                 report = self.keeper.sync()
                 if report.dropped:
                     self.refresh_pin_list()

@@ -67,7 +67,6 @@ class PinKeeper:
         self._backend = backend if backend is not None else Win32PinBackend()
         self._pins = ()
         self._owner_hwnd = owner_hwnd
-        self._keep_owner_front = True
 
     @property
     def owner_hwnd(self) -> int:
@@ -77,19 +76,6 @@ class PinKeeper:
     def set_owner(self, hwnd: int) -> tuple[str, ...]:
         """Adopt ``hwnd`` as the controller window and put it in front."""
         self._owner_hwnd = hwnd
-        return self._enforce_order()
-
-    @property
-    def keep_owner_front(self) -> bool:
-        return self._keep_owner_front
-
-    def set_keep_owner_front(self, enabled: bool) -> tuple[str, ...]:
-        """Keep the controller above every pinned window, or let it go back.
-
-        Pinned windows are always-on-top, so without this the controller ends
-        up buried underneath them and cannot be clicked at all.
-        """
-        self._keep_owner_front = bool(enabled)
         return self._enforce_order()
 
     def raise_owner(self) -> tuple[str, ...]:
@@ -205,10 +191,13 @@ class PinKeeper:
         return (owner,) + others
 
     def _owner_front_active(self) -> bool:
-        """True while the controller has to stay above the pinned windows."""
+        """True while the controller has to stay above the pinned windows.
+
+        Pinned windows are always-on-top, so a controller left in the normal
+        band would be buried under them and could not be clicked at all.
+        """
         return bool(
-            self._keep_owner_front
-            and self._pins
+            self._pins
             and self._owner_hwnd
             and self._backend.exists(self._owner_hwnd)
         )
