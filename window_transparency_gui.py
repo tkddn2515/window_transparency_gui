@@ -1,175 +1,397 @@
+"""Tkinter front end: control per-window transparency and always-on-top order."""
+
 import tkinter as tk
-from tkinter import ttk, messagebox
-import ctypes
-from ctypes import wintypes
+from tkinter import messagebox, ttk
+from typing import Optional, Sequence
 
-# --- Windows API Definitions using ctypes ---
+import pin_order
+import transparency
+import window_query
+from pin_drag import ListboxDragReorder
+from pin_keeper import PinKeeper
+from pin_order import PinError, PinnedWindow
+from topmost import WindowOperationError
 
-# Constants
-GWL_EXSTYLE = -20
-WS_EX_LAYERED = 0x80000
-LWA_ALPHA = 0x2
-RDW_ERASE = 0x0004
-RDW_INVALIDATE = 0x0001
-RDW_FRAME = 0x0400
-RDW_ALLCHILDREN = 0x0080
+DEFAULT_ALPHA_PERCENT = 85
+SYNC_INTERVAL_MS = 1000
+WINDOW_GEOMETRY = "520x680"
 
-# Function prototypes
-user32 = ctypes.WinDLL('user32')
-EnumWindows = user32.EnumWindows
-EnumWindowsProc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
-GetWindowTextW = user32.GetWindowTextW
-GetWindowTextLengthW = user32.GetWindowTextLengthW
-IsWindowVisible = user32.IsWindowVisible
-GetWindowLongW = user32.GetWindowLongW
-SetWindowLongW = user32.SetWindowLongW
-SetLayeredWindowAttributes = user32.SetLayeredWindowAttributes
-RedrawWindow = user32.RedrawWindow
 
 class WindowTransparencyApp:
-    def __init__(self, root):
+    """Wires the widgets to :mod:`transparency` and :class:`PinKeeper`."""
+
+    def __init__(self, root: tk.Tk, keeper: Optional[PinKeeper] = None) -> None:
         self.root = root
-        self.root.title("Window Transparency Controller")
-        self.root.geometry("450x400")
-        self.root.resizable(False, True)
+        self.root.title("Window Transparency & Always-on-Top Controller")
+        self.root.geometry(WINDOW_GEOMETRY)
+        self.root.minsize(420, 560)
 
-        # Store found windows as a list of (hwnd, title) tuples
-        self.open_windows = []
+        self.open_windows = ()
+        self.keeper = keeper if keeper is not None else PinKeeper()
+        self._sync_job = None
 
-        # --- GUI Setup ---
         main_frame = ttk.Frame(root, padding="10")
         main_frame.pack(fill=tk.BOTH, expand=True)
 
-        # Window List
-        list_frame = ttk.LabelFrame(main_frame, text="Open Windows")
+        self._build_window_list(main_frame)
+        self._build_transparency_controls(main_frame)
+        self._build_pin_controls(main_frame)
+
+        self.status_var = tk.StringVar(value="Ready. Please refresh the list.")
+        self.status_bar = ttk.Label(
+            root, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W, padding=5
+        )
+        self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+        self.refresh_pin_list()
+        self.refresh_window_list()
+        self._schedule_sync()
+
+    # --- Layout -----------------------------------------------------------
+
+    def _build_window_list(self, parent: ttk.Frame) -> None:
+        list_frame = ttk.LabelFrame(parent, text="Open Windows")
         list_frame.pack(fill=tk.BOTH, expand=True, pady=5)
 
-        self.listbox = tk.Listbox(list_frame, selectmode=tk.SINGLE)
+        self.listbox = tk.Listbox(list_frame, selectmode=tk.SINGLE, height=8)
         self.listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-        scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.listbox.yview)
+        scrollbar = ttk.Scrollbar(
+            list_frame, orient=tk.VERTICAL, command=self.listbox.yview
+        )
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.listbox.config(yscrollcommand=scrollbar.set)
 
-        # Controls
-        controls_frame = ttk.Frame(main_frame)
+        controls_frame = ttk.Frame(parent)
         controls_frame.pack(fill=tk.X, pady=5)
+        ttk.Button(
+            controls_frame, text="Refresh List", command=self.refresh_window_list
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        self.refresh_button = ttk.Button(controls_frame, text="Refresh List", command=self.refresh_window_list)
-        self.refresh_button.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
-
-        # Transparency Slider
-        slider_frame = ttk.LabelFrame(main_frame, text="Transparency Level (0% = Invisible, 100% = Opaque)")
+    def _build_transparency_controls(self, parent: ttk.Frame) -> None:
+        slider_frame = ttk.LabelFrame(
+            parent, text="Transparency Level (0% = Invisible, 100% = Opaque)"
+        )
         slider_frame.pack(fill=tk.X, pady=5)
-        
-        self.alpha_var = tk.IntVar(value=85)
-        self.slider = ttk.Scale(slider_frame, from_=0, to=100, orient=tk.HORIZONTAL, variable=self.alpha_var, command=self.update_slider_label)
-        self.slider.pack(fill=tk.X, expand=True, padx=5, pady=(5,0))
-        
-        self.slider_label = ttk.Label(slider_frame, text="85%")
+
+        self.alpha_var = tk.IntVar(value=DEFAULT_ALPHA_PERCENT)
+        self.slider = ttk.Scale(
+            slider_frame,
+            from_=0,
+            to=100,
+            orient=tk.HORIZONTAL,
+            variable=self.alpha_var,
+            command=self.update_slider_label,
+        )
+        self.slider.pack(fill=tk.X, expand=True, padx=5, pady=(5, 0))
+
+        self.slider_label = ttk.Label(slider_frame, text=f"{DEFAULT_ALPHA_PERCENT}%")
         self.slider_label.pack()
 
-        # Action Buttons
-        action_frame = ttk.Frame(main_frame)
+        action_frame = ttk.Frame(parent)
         action_frame.pack(fill=tk.X, pady=5)
+        ttk.Button(
+            action_frame, text="Apply Transparency", command=self.apply_transparency
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        ttk.Button(
+            action_frame, text="Reset Transparency", command=self.reset_transparency
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        self.apply_button = ttk.Button(action_frame, text="Apply Transparency", command=self.apply_transparency)
-        self.apply_button.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+    def _build_pin_controls(self, parent: ttk.Frame) -> None:
+        pin_frame = ttk.LabelFrame(
+            parent,
+            text="Always on Top (drag to reorder — the top row stays in front)",
+        )
+        pin_frame.pack(fill=tk.BOTH, expand=True, pady=5)
 
-        self.reset_button = ttk.Button(action_frame, text="Reset Transparency", command=self.reset_transparency)
-        self.reset_button.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        pin_body = ttk.Frame(pin_frame)
+        pin_body.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-        # Status Bar
-        self.status_var = tk.StringVar(value="Ready. Please refresh the list.")
-        self.status_bar = ttk.Label(root, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W, padding=5)
-        self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+        self.pin_listbox = tk.Listbox(pin_body, selectmode=tk.SINGLE, height=6)
+        self.pin_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        # Initial population of the list
-        self.refresh_window_list()
+        pin_scroll = ttk.Scrollbar(
+            pin_body, orient=tk.VERTICAL, command=self.pin_listbox.yview
+        )
+        pin_scroll.pack(side=tk.LEFT, fill=tk.Y)
+        self.pin_listbox.config(yscrollcommand=pin_scroll.set)
 
-    def update_slider_label(self, value):
+        self.pin_drag = ListboxDragReorder(
+            self.pin_listbox,
+            row_count=lambda: len(self.keeper.pins),
+            on_preview=self.preview_pin_order,
+            on_drop=self.drop_pin,
+        )
+
+        order_frame = ttk.Frame(pin_body)
+        order_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(5, 0))
+        ttk.Button(order_frame, text="▲ Up", width=8, command=self.move_pin_up).pack(
+            pady=(0, 3)
+        )
+        ttk.Button(order_frame, text="▼ Down", width=8, command=self.move_pin_down).pack()
+
+        pin_actions = ttk.Frame(pin_frame)
+        pin_actions.pack(fill=tk.X, padx=5, pady=(0, 5))
+        ttk.Button(
+            pin_actions, text="Pin Selected", command=self.pin_selected
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        ttk.Button(pin_actions, text="Unpin", command=self.unpin_selected).pack(
+            side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5)
+        )
+        ttk.Button(pin_actions, text="Unpin All", command=self.unpin_all).pack(
+            side=tk.LEFT, fill=tk.X, expand=True
+        )
+
+        self.lock_order_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            pin_frame,
+            text="Keep this order locked (re-apply automatically every second)",
+            variable=self.lock_order_var,
+        ).pack(anchor=tk.W, padx=5, pady=(0, 5))
+
+    # --- Window list ------------------------------------------------------
+
+    def update_slider_label(self, value: str) -> None:
         self.slider_label.config(text=f"{int(float(value))}%")
 
-    def _enum_windows_callback(self, hwnd, lParam):
-        if IsWindowVisible(hwnd):
-            length = GetWindowTextLengthW(hwnd)
-            if length > 0:
-                buffer = ctypes.create_unicode_buffer(length + 1)
-                GetWindowTextW(hwnd, buffer, length + 1)
-                self.open_windows.append((hwnd, buffer.value))
-        return True
-
-    def refresh_window_list(self):
+    def refresh_window_list(self) -> None:
         self.status_var.set("Refreshing window list...")
         self.listbox.delete(0, tk.END)
-        self.open_windows.clear()
-
-        # Enumerate all top-level windows
-        EnumWindows(EnumWindowsProc(self._enum_windows_callback), 0)
+        self.open_windows = window_query.enumerate_visible_windows()
 
         if not self.open_windows:
             self.listbox.insert(tk.END, "No windows found.")
             self.status_var.set("No windows found.")
-        else:
-            for _, title in self.open_windows:
-                self.listbox.insert(tk.END, title)
-            self.status_var.set(f"Found {len(self.open_windows)} window(s). Select one.")
+            return
 
-    def get_selected_hwnd(self):
-        selection_indices = self.listbox.curselection()
-        if not selection_indices:
-            messagebox.showwarning("No Selection", "Please select a window from the list.")
+        for info in self.open_windows:
+            marker = "📌 " if self.keeper.is_pinned(info.hwnd) else ""
+            self.listbox.insert(tk.END, f"{marker}{info.title}")
+        self.status_var.set(f"Found {len(self.open_windows)} window(s). Select one.")
+
+    def get_selected_window(self) -> Optional[window_query.WindowInfo]:
+        """Return the highlighted :class:`WindowInfo`, or None after warning."""
+        selection = self.listbox.curselection()
+        if not selection:
+            messagebox.showwarning(
+                "No Selection", "Please select a window from the list."
+            )
             return None
-        
-        selected_index = selection_indices[0]
-        if selected_index >= len(self.open_windows):
-             messagebox.showerror("Error", "Invalid selection. Please refresh the list.")
-             return None
 
-        hwnd, title = self.open_windows[selected_index]
-        return hwnd
+        index = selection[0]
+        if index >= len(self.open_windows):
+            messagebox.showerror("Error", "Invalid selection. Please refresh the list.")
+            return None
+        return self.open_windows[index]
 
-    def apply_transparency(self):
+    def get_selected_hwnd(self) -> Optional[int]:
+        info = self.get_selected_window()
+        return info.hwnd if info else None
+
+    # --- Transparency -----------------------------------------------------
+
+    def apply_transparency(self) -> None:
         hwnd = self.get_selected_hwnd()
         if not hwnd:
             return
 
-        alpha_percent = self.alpha_var.get()
-        alpha_value = int(255 * (alpha_percent / 100))
-
+        percent = self.alpha_var.get()
         try:
-            # Set window style to support transparency
-            ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE)
-            SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_LAYERED)
-            
-            # Set transparency
-            SetLayeredWindowAttributes(hwnd, 0, alpha_value, LWA_ALPHA)
-            
-            self.status_var.set(f"Applied {alpha_percent}% transparency to the selected window.")
-        except Exception as e:
-            self.status_var.set(f"Error applying transparency: {e}")
-            messagebox.showerror("Error", f"Could not apply transparency.\nError: {e}")
+            transparency.apply(hwnd, percent)
+            self.status_var.set(f"Applied {percent}% transparency to the window.")
+        except WindowOperationError as error:
+            self._report_error("Could not apply transparency.", error)
 
-    def reset_transparency(self):
+    def reset_transparency(self) -> None:
         hwnd = self.get_selected_hwnd()
         if not hwnd:
             return
 
         try:
-            # Remove the layered style to disable transparency
-            ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE)
-            SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style & ~WS_EX_LAYERED)
-            
-            # Force the window to redraw to reflect the change
-            RedrawWindow(hwnd, None, None, RDW_ERASE | RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN)
+            transparency.reset(hwnd)
+            self.status_var.set("Transparency has been reset for the window.")
+        except WindowOperationError as error:
+            self._report_error("Could not reset transparency.", error)
 
-            self.status_var.set("Transparency has been reset for the selected window.")
-        except Exception as e:
-            self.status_var.set(f"Error resetting transparency: {e}")
-            messagebox.showerror("Error", f"Could not reset transparency.\nError: {e}")
+    # --- Pinning ----------------------------------------------------------
+
+    def pin_selected(self) -> None:
+        info = self.get_selected_window()
+        if not info:
+            return
+        if self.keeper.is_pinned(info.hwnd):
+            self.status_var.set(f'"{info.title}" is already pinned.')
+            return
+
+        try:
+            failures = self.keeper.pin(info.hwnd, info.title)
+        except PinError as error:
+            self._report_error("Could not pin the window.", error)
+            return
+
+        self.refresh_pin_list()
+        self.refresh_window_list()
+        self._report_failures(
+            failures, f'Pinned "{info.title}" at layer {len(self.keeper.pins)}.'
+        )
+
+    def unpin_selected(self) -> None:
+        pin = self._selected_pin()
+        if not pin:
+            return
+
+        failures = self.keeper.unpin(pin.hwnd)
+        self.refresh_pin_list()
+        self.refresh_window_list()
+        self._report_failures(failures, f'Unpinned "{pin.title}".')
+
+    def unpin_all(self) -> None:
+        if not self.keeper.pins:
+            self.status_var.set("Nothing is pinned.")
+            return
+
+        failures = self.keeper.unpin_all()
+        self.refresh_pin_list()
+        self.refresh_window_list()
+        self._report_failures(failures, "All windows have been unpinned.")
+
+    def move_pin_up(self) -> None:
+        self._move_pin(-1)
+
+    def move_pin_down(self) -> None:
+        self._move_pin(1)
+
+    def _move_pin(self, offset: int) -> None:
+        selection = self.pin_listbox.curselection()
+        if not selection:
+            messagebox.showwarning(
+                "No Selection", "Please select a pinned window to reorder."
+            )
+            return
+
+        new_index, failures = self.keeper.move(selection[0], offset)
+        if new_index < 0:
+            self.status_var.set("That window is already at the end of the order.")
+            return
+
+        self.refresh_pin_list(select_index=new_index)
+        self.pin_listbox.see(new_index)
+        self._report_failures(failures, f"Moved to layer {new_index + 1}.")
+
+    def _selected_pin(self) -> Optional[PinnedWindow]:
+        selection = self.pin_listbox.curselection()
+        if not selection:
+            messagebox.showwarning(
+                "No Selection", "Please select a window from the pinned list."
+            )
+            return None
+
+        index = selection[0]
+        pins = self.keeper.pins
+        if index >= len(pins):
+            self.refresh_pin_list()
+            return None
+        return pins[index]
+
+    def preview_pin_order(self, start: int, current: int) -> None:
+        """Show how the list would look mid-drag, without touching any window."""
+        previewed = pin_order.moved(self.keeper.pins, start, current - start)
+        self._render_pin_rows(previewed, select_index=current)
+
+    def drop_pin(self, start: int, end: int) -> None:
+        """Commit a finished drag: restack the windows once, then redraw."""
+        new_index, failures = self.keeper.move(start, end - start)
+        if new_index < 0:
+            self.refresh_pin_list(select_index=start)
+            return
+
+        self.refresh_pin_list(select_index=new_index)
+        self.pin_listbox.see(new_index)
+        self._report_failures(failures, f"Moved to layer {new_index + 1}.")
+
+    def refresh_pin_list(self, select_index: Optional[int] = None) -> None:
+        """Redraw the pinned list from the keeper, front-most layer first."""
+        self._render_pin_rows(self.keeper.pins, select_index=select_index)
+
+    def _render_pin_rows(
+        self, pins: Sequence[PinnedWindow], select_index: Optional[int] = None
+    ) -> None:
+        """Draw ``pins`` as numbered rows.
+
+        Passing ``select_index`` highlights that row; otherwise the previous
+        selection is restored when it still exists.
+        """
+        previous = self.pin_listbox.curselection()
+        wanted = select_index if select_index is not None else (
+            previous[0] if previous else None
+        )
+        self.pin_listbox.delete(0, tk.END)
+
+        if not pins:
+            self.pin_listbox.insert(tk.END, "Nothing pinned yet.")
+            return
+
+        for layer, pin in enumerate(pins, start=1):
+            self.pin_listbox.insert(tk.END, f"{layer}. {pin.title}")
+        if wanted is not None and 0 <= wanted < len(pins):
+            self.pin_listbox.selection_clear(0, tk.END)
+            self.pin_listbox.selection_set(wanted)
+
+    # --- Order enforcement ------------------------------------------------
+
+    def _schedule_sync(self) -> None:
+        self._sync_job = self.root.after(SYNC_INTERVAL_MS, self._sync_tick)
+
+    def _sync_tick(self) -> None:
+        """Re-assert the pinned order on a timer, then reschedule."""
+        try:
+            if self.pin_drag.is_dragging:
+                return  # never rebuild the list while the user is dragging
+            if self.keeper.pins and self.lock_order_var.get():
+                report = self.keeper.sync()
+                if report.dropped:
+                    self.refresh_pin_list()
+                    closed = ", ".join(f'"{pin.title}"' for pin in report.dropped)
+                    self.status_var.set(f"Removed closed window(s) from pins: {closed}.")
+                elif report.failures:
+                    self.status_var.set(report.failures[0])
+        except Exception as error:  # a timer must never kill the event loop
+            self.status_var.set(f"Order lock paused: {error}")
+        finally:
+            self._schedule_sync()
+
+    # --- Shutdown / messaging --------------------------------------------
+
+    def on_close(self) -> None:
+        """Release every pinned window so nothing is left stuck on top."""
+        if self._sync_job is not None:
+            self.root.after_cancel(self._sync_job)
+            self._sync_job = None
+        try:
+            self.keeper.unpin_all()
+        except Exception:
+            pass  # closing must not be blocked by a protected window
+        self.root.destroy()
+
+    def _report_error(self, headline: str, error: Exception) -> None:
+        self.status_var.set(f"{headline} {error}")
+        messagebox.showerror("Error", f"{headline}\n\n{error}")
+
+    def _report_failures(self, failures: Sequence[str], success_message: str) -> None:
+        if not failures:
+            self.status_var.set(success_message)
+            return
+        detail = "\n".join(failures)
+        self.status_var.set(failures[0])
+        messagebox.showwarning("Some windows could not be changed", detail)
+
+
+def main() -> None:
+    root = tk.Tk()
+    WindowTransparencyApp(root)
+    root.mainloop()
 
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    app = WindowTransparencyApp(root)
-    root.mainloop()
+    main()

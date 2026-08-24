@@ -1,64 +1,97 @@
 # Window Transparency GUI
 
-A simple GUI application to control the transparency of any window on Microsoft Windows.
+윈도우(Microsoft Windows)에서 실행 중인 **아무 창이나 골라 투명하게 만들고, 화면 최상단에 고정**할 수 있는
+간단한 GUI 프로그램입니다. 여러 창을 동시에 고정했을 때 **어떤 창이 더 앞에 올지 순서까지 지정**할 수 있고,
+지정한 순서는 다른 프로그램이 앞으로 튀어나와도 자동으로 복구됩니다.
 
-## Features
+## 주요 기능
 
--   Lists all visible windows on the system.
--   Allows you to apply a transparency effect to any selected window.
--   Adjust transparency level with a simple slider (0% to 100%).
--   Reset the transparency of a window back to its default opaque state.
+- 현재 열려 있는 모든 창 목록 보기
+- 선택한 창의 **투명도 조절** (0% ~ 100%, 슬라이더)
+- 투명도를 원래대로(불투명) **되돌리기**
+- 선택한 창을 **화면 최상단에 고정** (항상 위)
+- 고정한 창이 여러 개일 때 **쌓이는 순서 고정** — 1번이 항상 2번, 3번보다 앞
+- 순서는 **드래그로 바로 변경** (버튼으로도 가능)
+- **순서 자동 유지** — 1초마다 순서를 다시 적용해서, 다른 "항상 위" 프로그램이 앞으로 나와도 원래 순서로 복구
+- 고정한 창이 닫히면 목록에서 자동 제거, 창 제목이 바뀌면 자동 갱신
+- 프로그램을 종료하면 고정이 모두 해제되어 창이 위에 박힌 채 남지 않음
 
-## How to Use
+## 설치 및 실행
 
-1.  **Run the application** (`WindowTransparencyGUI.exe` or `python window_transparency_gui.py`).
-2.  **Refresh List**: Click the "Refresh List" button to get a list of all currently open and visible windows.
-3.  **Select a Window**: Click on the title of the window you want to modify from the list.
-4.  **Adjust Transparency**:
-    *   Move the slider to the desired transparency level. (0% is fully transparent, 100% is fully opaque).
-    *   Click the **"Apply Transparency"** button.
-5.  **Reset Transparency**:
-    *   Select a window from the list that you have previously modified.
-    *   Click the **"Reset Transparency"** button to make it fully opaque again.
+### 방법 1. 실행 파일로 사용하기
 
-## How to Build
+`WindowTransparencyGUI.exe` 를 실행하면 바로 사용할 수 있습니다. 별도 설치가 필요 없습니다.
 
-Follow these steps to build this application into a standalone `.exe` file.
+### 방법 2. 파이썬으로 실행하기
 
-### 1. Create and Activate a Virtual Environment
-
-From the project folder, create and activate a Python virtual environment. If you already have one, just activate it.
+Python 3.11 이상이 필요합니다.
 
 ```bash
-# 1. Create virtual environment
-# Use python or python3 depending on your system's Python installation.
+# 1. 가상 환경 만들기
 python -m venv venv
 
-# 2. Activate virtual environment on Windows
+# 2. 가상 환경 활성화 (Windows)
 .\venv\Scripts\activate
-```
 
-### 2. Install Dependencies
-
-With the virtual environment activated, install the required packages from `requirements.txt`.
-
-```bash
+# 3. 필요한 패키지 설치
 pip install -r requirements.txt
+
+# 4. 실행
+python window_transparency_gui.py
 ```
 
-### 3. Build the Executable
-
-Use `pyinstaller` to build the `.py` file into an `.exe` executable.
+### 실행 파일(.exe)로 직접 빌드하기
 
 ```bash
 pyinstaller --onefile --windowed --name WindowTransparencyGUI window_transparency_gui.py
 ```
 
-**Build Options Explained:**
-*   `--onefile`: Bundles everything into a single executable file.
-*   `--windowed`: Prevents the console window (black terminal) from appearing when the application is run.
-*   `--name WindowTransparencyGUI`: Sets the output file name to `WindowTransparencyGUI.exe`.
+- `--onefile` : 하나의 실행 파일로 묶기
+- `--windowed` : 실행할 때 검은 콘솔 창이 뜨지 않도록 함
+- `--name` : 만들어질 실행 파일 이름
 
-### 4. Check the Result
+빌드가 끝나면 `dist` 폴더 안에 `WindowTransparencyGUI.exe` 가 생성됩니다.
 
-After a successful build, a `dist` folder will be created in the project directory. Your final `WindowTransparencyGUI.exe` file will be inside this folder.
+## 사용법
+
+### 1. 창 목록 불러오기
+
+**"Refresh List"** 버튼을 누르면 현재 열려 있는 창들이 목록에 나타납니다.
+새로 띄운 창이 보이지 않으면 이 버튼을 다시 눌러 주세요.
+
+### 2. 투명하게 만들기
+
+1. 목록에서 원하는 창의 제목을 클릭합니다.
+2. 슬라이더로 투명도를 조절합니다. (**0% = 완전히 투명**, **100% = 불투명**)
+3. **"Apply Transparency"** 버튼을 누릅니다.
+
+원래대로 되돌리려면 그 창을 다시 선택하고 **"Reset Transparency"** 를 누르면 됩니다.
+
+### 3. 화면 최상단에 고정하기
+
+1. 목록에서 창을 선택하고 **"Pin Selected"** 버튼을 누릅니다.
+2. 고정된 창은 아래 **"Always on Top"** 목록에 추가되고, 창 목록에서는 📌 표시가 붙습니다.
+
+### 4. 순서 정하기
+
+**"Always on Top"** 목록의 번호가 곧 쌓이는 순서입니다. **1번이 가장 앞(위)** 입니다.
+
+- **드래그로 바꾸기**: 목록에서 창을 마우스로 끌어 원하는 위치에 놓으면 됩니다.
+  끄는 동안에는 목록에서 미리보기만 바뀌고, 손을 떼는 순간 실제 창 순서에 반영됩니다.
+- **버튼으로 바꾸기**: 창을 선택하고 **▲ Up** / **▼ Down** 버튼을 누릅니다.
+- **"Keep this order locked"** 를 켜 두면 (기본값) 1초마다 순서를 다시 적용합니다.
+  다른 "항상 위" 프로그램이 앞으로 끼어들어도 지정한 순서로 되돌아갑니다.
+
+### 5. 고정 해제하기
+
+- **"Unpin"** : "Always on Top" 목록에서 선택한 창만 해제
+- **"Unpin All"** : 고정된 창 전부 해제
+- 프로그램을 그냥 닫아도 고정은 모두 해제됩니다.
+
+## 참고 사항
+
+- 관리자 권한으로 실행 중인 프로그램의 창은 Windows가 변경을 막습니다.
+  그런 창을 고정하려면 이 프로그램도 **관리자 권한으로 실행**해 주세요.
+- 투명도를 0%로 만들면 창이 완전히 보이지 않게 됩니다. 이때는 목록에서 그 창을 다시 선택해
+  **"Reset Transparency"** 를 누르면 복구됩니다.
+- 한 번에 최대 32개의 창까지 고정할 수 있습니다.
