@@ -127,16 +127,18 @@ class PinKeeper:
     def restore(self, pins: Sequence[PinnedWindow]) -> tuple[PinnedWindow, ...]:
         """Adopt windows a previous run left pinned, keeping their saved order.
 
-        Only windows that still exist, still carry the same title and are still
-        always-on-top are taken back; a recycled handle must never be grabbed.
+        A window is taken back only while it still exists and is still
+        always-on-top, so a handle that has been recycled by an ordinary window
+        is never grabbed.  The title is refreshed rather than required to match:
+        browsers, editors and terminals rename themselves constantly, and the
+        window would otherwise stay stranded on top with nothing to undo it.
         """
         adopted = tuple(
-            pin
+            pin._replace(title=self._backend.title_of(pin.hwnd) or pin.title)
             for pin in pins[:pin_order.MAX_PINNED_WINDOWS]
             if pin.hwnd > 0
             and self._backend.exists(pin.hwnd)
             and self._backend.is_topmost(pin.hwnd)
-            and self._backend.title_of(pin.hwnd) == pin.title
         )
         if not adopted:
             return ()
